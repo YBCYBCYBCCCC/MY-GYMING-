@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>IronLog 健身日志</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 引入 React 和图标库的映射 -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.263.1"
+      }
+    }
+  </script>
+  <!-- 引入 Babel 编译器 -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    /* 修复手机端点击高亮 */
+    * { -webkit-tap-highlight-color: transparent; }
+    body { background-color: #f9fafb; }
+    /* 确保输入框背景透明 */
+    input[type="text"], input[type="number"], textarea {
+        background-color: transparent;
+        outline: none;
+    }
+    /* 训练时长标记 */
+    .day-duration {
+        position: absolute;
+        bottom: 2px;
+        right: 2px;
+        font-size: 8px;
+        color: #fff;
+        background-color: rgba(0, 0, 0, 0.4);
+        padding: 0 2px;
+        border-radius: 4px;
+        line-height: 1;
+        font-weight: bold;
+        z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef } from 'react';
+    import ReactDOM from 'react-dom/client';
+    import { 
+      Calendar as CalendarIcon, Dumbbell, BookOpen, TrendingUp, ChevronLeft, ChevronRight, 
+      Plus, X, Info, Clock, Play, Pause, RotateCcw, CheckCircle2, Circle, ArrowLeft, 
+      GripVertical, Music, Layers, CheckSquare, Timer 
+    } from 'lucide-react';
+
+    // --- 模拟图表组件 ---
+    const SimpleLineChart = ({ data, color = "indigo" }) => {
+      if (!data || data.length < 2) return <div className="text-gray-400 text-xs">数据不足以生成图表</div>;
+      const max = Math.max(...data);
+      const min = Math.min(...data);
+      const range = max - min || 1;
+      
+      return (
+        <div className="h-24 flex items-end justify-between gap-1 pt-4 border-b border-gray-100 pb-2">
+          {data.map((val, i) => {
+            const height = ((val - min) / range) * 80 + 10; 
+            return (
+              <div key={i} className="flex flex-col items-center flex-1 group">
+                 <div 
+                   className={`w-full rounded-t-sm bg-${color}-400 opacity-60 group-hover:opacity-100 transition-all`}
+                   style={{ height: `${height}%` }}
+                 ></div>
+              </div>
+            )
+          })}
+        </div>
+      );
+    };
+
+    // --- 初始数据 ---
+    const INITIAL_EXERCISES = [
+        // --- 胸部 ---
+        { id: 101, name: '哑铃卧推', part: '胸部', maxWeight: '30', sets: '4', reps: '8-12', note: '' },
+        { id: 102, name: '平板杠铃窄距卧推', part: '胸部', maxWeight: '60', sets: '4', reps: '8-12', note: '与肩同宽 下落到上腹部' },
+        { id: 103, name: '窄距俯卧撑', part: '胸部', maxWeight: '0', sets: '4', reps: '力竭', note: '核心收紧' },
+        { id: 104, name: '坐姿夹胸', part: '胸部', maxWeight: '40', sets: '4', reps: '12-15', note: '顶峰收缩' },
+        
+        // --- 背部 ---
+        { id: 201, name: '杠铃划船 / 坐姿划船', part: '背部', maxWeight: '60', sets: '4', reps: '10', note: '卧推握距' },
+        { id: 202, name: '对握窄距高位下拉', part: '背部', maxWeight: '50', sets: '4', reps: '10-12', note: '肩宽或窄与肩' },
+        { id: 203, name: '对握宽距高位下拉', part: '背部', maxWeight: '50', sets: '4', reps: '10-12', note: '卧推握距或宽与肩' },
+        { id: 204, name: '直臂下压', part: '背部', maxWeight: '25', sets: '4', reps: '15', note: '感受背阔肌发力' },
+
+        // --- 肩部 ---
+        { id: 301, name: '哑铃提拉 (中后束)', part: '肩部', maxWeight: '15', sets: '4', reps: '12', note: '针对中后束' },
+        { id: 302, name: '反向飞鸟 (后束)', part: '肩部', maxWeight: '10', sets: '4', reps: '15', note: '针对后束' },
+        { id: 303, name: '哑铃提拉 (中束)', part: '肩部', maxWeight: '15', sets: '4', reps: '12', note: '针对中束' },
+        { id: 304, name: '侧平举', part: '肩部', maxWeight: '10', sets: '6', reps: '15', note: '哑铃不要超过肩膀高度' },
+
+        // --- 手臂 ---
+        { id: 401, name: '哑铃窄距二头弯举', part: '手臂', maxWeight: '15', sets: '4', reps: '12', note: '🔥 超级组：建议与三头颈后臂屈伸连着做' },
+        { id: 402, name: '三头颈后臂屈伸', part: '手臂', maxWeight: '20', sets: '4', reps: '12', note: '🔥 超级组：建议与二头弯举连着做' },
+        { id: 403, name: '哑铃垂式弯举', part: '手臂', maxWeight: '15', sets: '4', reps: '12', note: '🔥 超级组：建议与平板凳臂屈伸连着做' },
+        { id: 404, name: '平板凳坐姿臂屈伸', part: '手臂', maxWeight: '0', sets: '4', reps: '15', note: '腰背直立贴住凳子，直上直下，下落到大臂跟地面水平。🔥 建议与垂式弯举连着做' },
+
+        // --- 腿部 ---
+        { id: 501, name: '传统硬拉', part: '腿部', maxWeight: '100', sets: '5', reps: '5', note: '' },
+        { id: 502, name: '负重箭步蹲', part: '腿部', maxWeight: '20', sets: '4', reps: '12', note: '箭步蹲站距：一次一个脚掌，下一次练腿两个脚掌，交替做。膝盖不要内扣' },
+        { id: 503, name: '坐姿或俯身腿弯举', part: '腿部', maxWeight: '35', sets: '4', reps: '12', note: '' },
+        { id: 504, name: '坐姿腿屈伸', part: '腿部', maxWeight: '40', sets: '4', reps: '12', note: '' },
+    ];
+
+    const INITIAL_LOGS = {
+        '2025-11-28': { 
+          status: 'trained', 
+          title: '胸部训练', 
+          weight: 73.5, 
+          cardio: 20, 
+          duration: 1.5, 
+          exercises: [{ id: 101, name: '哑铃卧推', sets: '4', reps: '8', weight: '30', completed: true }] 
+        }
+    };
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('calendar'); 
+      const [exercises, setExercises] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('ironlog_exercises')) || INITIAL_EXERCISES; } catch (e) { return INITIAL_EXERCISES; }
+      });
+      const [logs, setLogs] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('ironlog_logs')) || INITIAL_LOGS; } catch (e) { return INITIAL_LOGS; }
+      });
+      const [selectedDate, setSelectedDate] = useState(new Date());
+      const [currentMonth, setCurrentMonth] = useState(new Date());
+      const [selectedForSession, setSelectedForSession] = useState([]);
+      const [showTimer, setShowTimer] = useState(false);
+      const [timerRunning, setTimerRunning] = useState(false);
+      const [timeLeft, setTimeLeft] = useState(60); 
+      const [totalTime, setTotalTime] = useState(60); 
+      
+      const [newExName, setNewExName] = useState('');
+      const [newExPart, setNewExPart] = useState('胸部'); 
+      const [newExMaxWeight, setNewExMaxWeight] = useState('');
+      const [newExSets, setNewExSets] = useState('4');
+      const [newExReps, setNewExReps] = useState('12');
+      const [newExNote, setNewExNote] = '';
+      const [showAddForm, setShowAddForm] = useState(false);
+
+
+      // 自动保存
+      useEffect(() => { localStorage.setItem('ironlog_exercises', JSON.stringify(exercises)); }, [exercises]);
+      useEffect(() => { localStorage.setItem('ironlog_logs', JSON.stringify(logs)); }, [logs]);
+
+      // 计时器逻辑
+      useEffect(() => {
+        let interval = null;
+        if (timerRunning && timeLeft > 0) {
+          interval = setInterval(() => setTimeLeft((t) => t - 1), 1000);
+        } else if (timeLeft === 0 && timerRunning) {
+          setTimerRunning(false);
+          if(navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        }
+        return () => clearInterval(interval);
+      }, [timerRunning, timeLeft]);
+
+      const handleTimePreset = (newTime) => { setTotalTime(newTime); setTimeLeft(newTime); setTimerRunning(false); };
+      const getDaysInMonth = (date) => ({ 
+        daysInMonth: new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate(),
+        firstDay: new Date(date.getFullYear(), date.getMonth(), 1).getDay() 
+      });
+      const formatDateKey = (date) => date.toISOString().split('T')[0];
+      const dateKey = formatDateKey(selectedDate);
+      const currentLog = logs[dateKey] || { status: 'none', title: '', weight: '', cardio: '', duration: '', exercises: [] };
+
+      const updateLog = (field, value) => {
+        setLogs(prev => ({ ...prev, [dateKey]: { ...currentLog, [field]: value } }));
+      };
+
+      const toggleStatus = (targetStatus) => {
+        updateLog('status', currentLog.status === targetStatus ? 'none' : targetStatus);
+      };
+
+      const commitSelectionToDay = () => {
+        if (selectedForSession.length === 0) return;
+        const newExs = selectedForSession.map(id => {
+          const master = exercises.find(e => e.id === id);
+          return { id: master.id, name: master.name, sets: master.sets, reps: master.reps, weight: master.maxWeight, completed: false };
+        });
+        updateLog('exercises', [...(currentLog.exercises || []), ...newExs]);
+        if (currentLog.status !== 'trained') updateLog('status', 'trained');
+        setSelectedForSession([]);
+        setActiveTab('calendar');
+      };
+
+      const toggleSelection = (exId) => {
+        if (selectedForSession.includes(exId)) {
+          setSelectedForSession(prev => prev.filter(id => id !== exId));
+        } else {
+          setSelectedForSession(prev => [...prev, exId]);
+        }
+      };
+
+      const toggleGroupSelection = (groupList) => {
+        const groupIds = groupList.map(ex => ex.id);
+        const allSelected = groupIds.every(id => selectedForSession.includes(id));
+        setSelectedForSession(prev => allSelected ? prev.filter(id => !groupIds.includes(id)) : [...prev, ...groupIds.filter(id => !prev.includes(id))]);
+      };
+
+      const getGroupedExercises = () => {
+        const groups = {};
+        exercises.forEach(ex => { if (!groups[ex.part]) groups[ex.part] = []; groups[ex.part].push(ex); });
+        // 确保顺序正确：胸, 背, 肩, 手臂, 腿
+        return ['胸部', '背部', '肩部', '手臂', '腿部', '其他'].map(part => ({ part, list: groups[part] || [] })).filter(g => g.list.length > 0);
+      };
+      
+      const handleAddNewExercise = () => {
+        if (!newExName || !newExPart || !newExSets || !newExReps) {
+          alert('请填写完整的动作名称、部位、组数和次数！');
+          return;
+        }
+        
+        const newEx = {
+          id: Date.now(),
+          name: newExName,
+          part: newExPart,
+          maxWeight: newExMaxWeight || '0',
+          sets: newExSets,
+          reps: newExReps,
+          note: newExNote,
+        };
+        
+        setExercises(prev => [...prev, newEx]);
+        setShowAddForm(false);
+        setNewExName('');
+        setNewExMaxWeight('');
+        setNewExNote('');
+      };
+      
+      const handleDurationChange = (e) => {
+        const value = parseFloat(e.target.value);
+        updateLog('duration', isNaN(value) ? '' : value);
+      }
+      
+      // 拖拽函数 (简化，无实际效果，仅为兼容之前代码)
+      const handleDragStart = (e, index) => {};
+      const handleDragOver = (e, index) => {};
+      const handleDragEnd = () => {};
+
+
+      return (
+        <div className="min-h-screen bg-gray-50 flex justify-center font-sans text-gray-800">
+          <div className="w-full max-w-md bg-white min-h-screen shadow-2xl relative flex flex-col">
+            {/* Header */}
+            <div className="bg-gray-900 text-white p-4 pt-8 sticky top-0 z-20 shadow-md flex justify-between items-center">
+              <div>
+                <h1 className="text-xl font-bold flex items-center gap-2"><Dumbbell className="text-red-500" /> IRON LOG</h1>
+                <p className="text-xs text-gray-400">塑造更强的自己</p>
+              </div>
+              <button onClick={() => setShowTimer(!showTimer)} className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all shadow-lg ${timerRunning ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-800 text-gray-200 border border-gray-700'}`}>
+                <Clock className={`w-5 h-5 ${timerRunning ? 'animate-spin' : ''}`} />
+                {timerRunning ? `${timeLeft}s` : '休息'}
+              </button>
+            </div>
+
+            {/* Timer Modal */}
+            {showTimer && (
+              <div className="bg-gray-800 text-white p-5 border-b-4 border-red-500 shadow-2xl z-30 fixed top-[80px] w-full max-w-md">
+                <div className="flex justify-between items-center mb-6">
+                  <div><span className="text-xs text-gray-400 font-bold uppercase">Current Rest</span><div className={`text-5xl font-mono font-black ${timeLeft < 10 ? 'text-red-500' : ''}`}>{Math.floor(timeLeft / 60)}:{Math.floor(timeLeft % 60).toString().padStart(2, '0')}</div></div>
+                  <div className="flex gap-3">
+                    <button onClick={() => setTimerRunning(!timerRunning)} className={`w-14 h-14 rounded-full flex items-center justify-center ${timerRunning ? 'bg-yellow-500 text-black' : 'bg-emerald-500 text-white'}`}>{timerRunning ? <Pause className="w-6 h-6"/> : <Play className="w-6 h-6 ml-1"/>}</button>
+                    <button onClick={() => { setTimeLeft(totalTime); setTimerRunning(false); }} className="w-14 h-14 rounded-full bg-gray-700 text-white flex items-center justify-center"><RotateCcw className="w-6 h-6"/></button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-2">
+                   {[60, 90, 180, 300].map(sec => <button key={sec} onClick={() => handleTimePreset(sec)} className={`h-12 rounded-xl font-bold ${totalTime === sec ? 'bg-red-500 text-white' : 'bg-gray-700 text-gray-300'}`}>{sec >= 60 ? `${sec/60}m` : `${sec}s`}</button>)}
+                </div>
+              </div>
+            )}
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto pb-24">
+              {activeTab === 'calendar' && (
+                <div className="p-4 space-y-6">
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+                    <div className="flex justify-between items-center mb-4">
+                      <button onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1)))}><ChevronLeft/></button>
+                      <h2 className="font-bold text-lg">{currentMonth.getFullYear()}年 {currentMonth.getMonth() + 1}月</h2>
+                      <button onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() + 1)))}><ChevronRight/></button>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1 text-center mb-2">{['日','一','二','三','四','五','六'].map(d => <div key={d} className="text-xs text-gray-400">{d}</div>)}</div>
+                    <div className="grid grid-cols-7 gap-2">
+                      {Array(getDaysInMonth(currentMonth).firstDay).fill(null).map((_, i) => <div key={`e-${i}`}/>)}
+                      {Array(getDaysInMonth(currentMonth).daysInMonth).fill(null).map((_, i) => {
+                        const day = i + 1;
+                        const d = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+                        const k = formatDateKey(d);
+                        const log = logs[k];
+                        const isSelected = k === dateKey;
+                        let cls = "text-gray-700 hover:bg-gray-100";
+                        if (log?.status === 'trained') cls = "bg-red-500 text-white shadow-lg shadow-red-200 scale-105 font-bold";
+                        else if (log?.status === 'rest') cls = "bg-emerald-400 text-white shadow-lg shadow-emerald-200 scale-105 font-bold";
+                        return (
+                          <button key={day} onClick={() => setSelectedDate(d)} className={`aspect-square rounded-full flex items-center justify-center text-sm transition-all relative ${cls} ${isSelected ? 'ring-2 ring-gray-900 ring-offset-2 z-10' : ''}`}>
+                            {day}
+                            {log?.duration && log.duration > 0 && <span className="day-duration">{log.duration}h</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden min-h-[400px]">
+                    <div className="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center">
+                      <div><span className="text-xs text-gray-400 uppercase tracking-wider">{selectedDate.toLocaleDateString()}</span><input type="text" placeholder="今日主题" className="block w-full bg-transparent font-bold text-lg outline-none" value={currentLog.title} onChange={(e) => updateLog('title', e.target.value)} /></div>
+                      <div className="flex gap-2">
+                        <button onClick={() => toggleStatus('trained')} className={`p-3 rounded-xl transition-all ${currentLog.status === 'trained' ? 'bg-red-500 text-white shadow-lg' : 'bg-gray-100 text-gray-400'}`}><Dumbbell className="w-5 h-5"/></button>
+                        <button onClick={() => toggleStatus('rest')} className={`p-3 rounded-xl transition-all ${currentLog.status === 'rest' ? 'bg-emerald-400 text-white shadow-lg' : 'bg-gray-100 text-gray-400'}`}><CalendarIcon className="w-5 h-5"/></button>
+                      </div>
+                    </div>
+                    <div className="p-4 space-y-4">
+                      
+                      {/* 体重栏 */}
+                      <div className="flex items-center gap-3 bg-blue-50 p-3 rounded-xl border border-blue-100">
+                        <div className="bg-blue-200 p-2 rounded-full text-blue-700"><TrendingUp className="w-4 h-4"/></div>
+                        <div className="flex-1"><label className="text-xs text-blue-600 font-medium">体重 (Weight)</label><div className="flex items-baseline gap-1"><input type="number" step="0.1" placeholder="0.0" className="bg-transparent text-xl font-bold text-blue-900 outline-none w-20" value={currentLog.weight} onChange={(e) => updateLog('weight', e.target.value)} /><span className="text-sm text-blue-500">KG</span></div></div>
+                      </div>
+                      
+                      {/* 有氧栏 */}
+                      <div className="flex items-center gap-3 bg-orange-50 p-3 rounded-xl border border-orange-100">
+                        <div className="bg-orange-200 p-2 rounded-full text-orange-700"><Timer className="w-4 h-4"/></div>
+                        <div className="flex-1"><label className="text-xs text-orange-600 font-medium">今日有氧 (Cardio)</label><div className="flex items-baseline gap-1"><input type="number" placeholder="0" className="bg-transparent text-xl font-bold text-orange-900 outline-none w-20" value={currentLog.cardio} onChange={(e) => updateLog('cardio', e.target.value)} /><span className="text-sm text-orange-500">Min</span></div></div>
+                      </div>
+                      
+                      {/* 训练时长栏 (新增) */}
+                      <div className="flex items-center gap-3 bg-fuchsia-50 p-3 rounded-xl border border-fuchsia-100">
+                        <div className="bg-fuchsia-200 p-2 rounded-full text-fuchsia-700"><Clock className="w-4 h-4"/></div>
+                        <div className="flex-1"><label className="text-xs text-fuchsia-600 font-medium">总训练时长 (Duration)</label><div className="flex items-baseline gap-1"><input type="number" step="0.1" placeholder="0.0" className="bg-transparent text-xl font-bold text-fuchsia-900 outline-none w-20" value={currentLog.duration} onChange={handleDurationChange} /><span className="text-sm text-fuchsia-500">Hrs</span></div></div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center mb-3"><h3 className="font-bold text-gray-700">今日安排</h3><button onClick={() => setActiveTab('library')} className="text-xs flex items-center gap-1 font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full hover:bg-indigo-100"><Plus className="w-3 h-3"/> 添加动作</button></div>
+                        {currentLog.exercises && currentLog.exercises.length > 0 ? (
+                          <div className="space-y-3">
+                            {currentLog.exercises.map((item, index) => (
+                              <div key={index} draggable="true" onDragStart={(e) => handleDragStart(e, index)} onDragOver={(e) => handleDragOver(e, index)} onDragEnd={handleDragEnd} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm hover:shadow-md transition-all">
+                                <div className="flex justify-between items-start mb-2"><div className="flex items-center gap-2"><div className="cursor-grab text-gray-300"><GripVertical className="w-4 h-4"/></div><span className="font-bold text-gray-800">{item.name}</span></div><button onClick={() => {const ex = [...currentLog.exercises]; ex.splice(index,1); updateLog('exercises', ex);}} className="text-gray-300 hover:text-red-500"><X className="w-4 h-4"/></button></div>
+                                <div className="grid grid-cols-3 gap-2 text-sm pl-6">{['sets', 'reps', 'weight'].map(field => (<div key={field} className="bg-gray-50 rounded p-1.5"><span className="text-[10px] text-gray-400 capitalize">{field}</span><input
+                                  type={field === 'weight' || field === 'reps' ? 'number' : 'text'}
+                                  step={field === 'weight' ? '0.1' : '1'}
+                                  className="bg-transparent font-bold w-full outline-none" 
+                                  value={item[field]} 
+                                  onChange={(e) => {const ex = [...currentLog.exercises]; ex[index][field] = e.target.value; updateLog('exercises', ex);}} 
+                                /></div>))}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : <div className="text-center py-8 text-gray-400 text-sm bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">点击上方按钮添加</div>}
+                      </div>
+                      <textarea placeholder="训练心得..." className="w-full text-sm bg-gray-50 p-3 rounded-xl outline-none h-24 border border-transparent focus:bg-white focus:border-gray-200" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'library' && (
+                <div className="p-4 pb-32">
+                  <div className="flex items-center gap-2 mb-6">
+                    <button onClick={() => setActiveTab('calendar')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="w-5 h-5 text-gray-600"/></button>
+                    <div><h2 className="text-2xl font-bold text-gray-800">动作库</h2><p className="text-sm text-gray-500">已选 {selectedForSession.length} 个动作</p></div>
+                  </div>
+                  
+                  {/* 新增动作表单 */}
+                  <div className={`bg-white p-4 rounded-xl shadow-lg border border-indigo-100 mb-6 ${showAddForm ? 'block' : 'hidden'}`}>
+                      <h3 className="font-bold text-indigo-700 mb-3 flex justify-between items-center">
+                          添加新动作
+                          <button onClick={() => setShowAddForm(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4"/></button>
+                      </h3>
+                      <div className="space-y-3">
+                          <input type="text" placeholder="动作名称 (如: 罗马尼亚硬拉)" value={newExName} onChange={(e) => setNewExName(e.target.value)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                          <select value={newExPart} onChange={(e) => setNewExPart(e.target.value)} className="w-full p-2 border border-gray-200 rounded-lg text-sm">
+                              {['胸部', '背部', '肩部', '手臂', '腿部', '其他'].map(part => <option key={part} value={part}>{part}</option>)}
+                          </select>
+                          <div className="grid grid-cols-3 gap-2">
+                              <input type="text" placeholder="默认组数 (e.g., 4)" value={newExSets} onChange={(e) => setNewExSets(e.target.value)} className="p-2 border border-gray-200 rounded-lg text-sm" />
+                              <input type="text" placeholder="默认次数 (e.g., 12)" value={newExReps} onChange={(e) => setNewExReps(e.target.value)} className="p-2 border border-gray-200 rounded-lg text-sm" />
+                              <input type="number" placeholder="极限重量(KG)" value={newExMaxWeight} onChange={(e) => setNewExMaxWeight(e.target.value)} className="p-2 border border-gray-200 rounded-lg text-sm" />
+                          </div>
+                          <textarea placeholder="动作备注/要领 (可选)" value={newExNote} onChange={(e) => setNewExNote(e.target.value)} className="w-full p-2 border border-gray-200 rounded-lg text-sm h-16" />
+                          <button onClick={handleAddNewExercise} className="w-full bg-indigo-600 text-white p-2 rounded-lg font-bold hover:bg-indigo-700 transition-colors">
+                              + 添加到我的动作库
+                          </button>
+                      </div>
+                  </div>
+                  
+                  <button onClick={() => setShowAddForm(prev => !prev)} className={`w-full p-3 rounded-xl font-bold text-sm mb-4 transition-colors ${showAddForm ? 'bg-red-500 text-white' : 'bg-indigo-500 text-white hover:bg-indigo-600'}`}>
+                    {showAddForm ? '隐藏添加表单' : '+ 创建新动作'}
+                  </button>
+
+                  <div className="space-y-6">
+                    {getGroupedExercises().map(group => {
+                      const groupIds = group.list.map(ex => ex.id);
+                      const isAllSelected = groupIds.every(id => selectedForSession.includes(id));
+                      return (
+                        <div key={group.part}>
+                          <div className="flex justify-between items-center mb-3 px-1">
+                            <div className="flex items-center gap-2"><div className="w-1 h-5 bg-red-500 rounded-full"/><h3 className="font-bold text-gray-700 text-lg">{group.part}</h3></div>
+                            <button onClick={() => toggleGroupSelection(group.list)} className={`text-xs px-3 py-1.5 rounded-full font-bold flex gap-1 ${isAllSelected ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {isAllSelected ? <CheckSquare className="w-3 h-3"/> : <Layers className="w-3 h-3"/>} {isAllSelected ? '已全选' : '全选'}
+                            </button>
+                          </div>
+                          <div className="grid gap-3">
+                            {group.list.map(ex => {
+                              const isSelected = selectedForSession.includes(ex.id);
+                              return (
+                                <div key={ex.id} className={`rounded-xl border cursor-pointer p-4 ${isSelected ? 'bg-indigo-50 border-indigo-500' : 'bg-white border-gray-100'}`} onClick={() => toggleSelection(ex.id)}>
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3"><div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-400'}`}>{isSelected ? <CheckCircle2 className="w-6 h-6"/> : ex.name[0]}</div><div><h3 className={`font-bold ${isSelected ? 'text-indigo-900' : 'text-gray-800'}`}>{ex.name}</h3><span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{ex.sets}x{ex.reps}</span></div></div>
+                                    {isSelected ? <div className="w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center"><CheckCircle2 className="w-4 h-4 text-white"/></div> : <Circle className="w-6 h-6 text-gray-300"/>}
+                                  </div>
+                                  {ex.note && <div className="mt-2 text-xs text-gray-500">💡 {ex.note}</div>}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  
+                  {selectedForSession.length > 0 && <div className="fixed bottom-24 left-0 right-0 px-6 z-30 flex justify-center"><button onClick={commitSelectionToDay} className="bg-indigo-600 text-white shadow-xl px-8 py-4 rounded-full font-bold flex gap-2">确认添加 {selectedForSession.length} 个动作 <ChevronRight className="w-5 h-5"/></button></div>}
+                </div>
+              )}
+
+              {activeTab === 'stats' && (
+                <div className="p-4 space-y-6">
+                  <h2 className="text-2xl font-bold text-gray-800">训练洞察</h2>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100"><div className="flex justify-between mb-4"><h3 className="font-bold text-gray-700">体重趋势</h3></div><SimpleLineChart data={[76.5, 76.2, 76.0, 75.8, 75.5, 75.4, 75.2]} color="blue" /></div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100"><div className="flex justify-between mb-4"><h3 className="font-bold text-gray-700">有氧时长 (最近7天)</h3></div><SimpleLineChart data={[20, 0, 30, 45, 0, 30, 40]} color="orange" /></div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Nav */}
+            <div className="absolute bottom-0 w-full bg-white border-t border-gray-100 px-6 py-4 flex justify-between items-center z-20">
+              <button onClick={() => setActiveTab('calendar')} className={`flex flex-col items-center gap-1 ${activeTab === 'calendar' ? 'text-gray-900' : 'text-gray-400'}`}><CalendarIcon className="w-6 h-6"/><span className="text-[10px] font-medium">日历</span></button>
+              <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center gap-1 ${activeTab === 'library' ? 'text-gray-900' : 'text-gray-400'}`}><BookOpen className="w-6 h-6"/><span className="text-[10px] font-medium">动作库</span></button>
+              <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center gap-1 ${activeTab === 'stats' ? 'text-gray-900' : 'text-gray-400'}`}><TrendingUp className="w-6 h-6"/><span className="text-[10px] font-medium">洞察</span></button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
